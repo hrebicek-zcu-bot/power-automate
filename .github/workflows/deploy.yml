@@ -1,0 +1,119 @@
+# Nasazení aplikace na GitHub Pages na žádost z Power Automate.
+#
+# Spouští se:
+#   - repository_dispatch s typem "deploy" (akce GitHub konektoru
+#     „Create a repository dispatch event“ v Power Automate),
+#   - ručně z GitHubu (workflow_dispatch) pro testování.
+#
+# Očekávaný client_payload z Power Automate:
+#   {
+#     "version": "1.2.0",            povinné, tvar X.Y.Z (volitelně s „v“)
+#     "environment": "test",         povinné, "test" nebo "produkce"
+#     "requested_by": "jmeno@...",   kdo žádal
+#     "requested_at": "2026-11-08T14:05:00Z",  kdy vznikla žádost (ISO 8601)
+#     "approved_by": "jmeno@...",    kdo schválil (jen flow se schválením)
+#     "request_id": "abc123",        id běhu flow, pro dohledání
+#     "flow": "flow1-rucni"          který flow žádost poslal
+#   }
+name: Nasazení
+
+on:
+  repository_dispatch:
+    types: [deploy]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Verze (X.Y.Z)
+        required: true
+        default: 0.1.0
+      environment:
+        description: Prostředí
+        required: true
+        type: choice
+        options: [test, produkce]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: nasazeni
+  cancel-in-progress: false
+
+jobs:
+  kontrola:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vstupy.outputs.version }}
+      environment: ${{ steps.vstupy.outputs.environment }}
+    steps:
+      - name: Kontrola vstupů
+        id: vstupy
+        env:
+          VERSION: ${{ github.event.client_payload.version || inputs.version }}
+          ENVIRONMENT: ${{ github.event.client_payload.environment || inputs.environment }}
+        run: |
+          VERSION="${VERSION#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Neplatná verze '$VERSION' – očekávám tvar X.Y.Z."
+            exit 1
+          fi
+          if [[ "$ENVIRONMENT" != "test" && "$ENVIRONMENT" != "produkce" ]]; then
+            echo "::error::Neplatné prostředí '$ENVIRONMENT' – povoleno je 'test' nebo 'produkce'."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+
+  nasazeni:
+    needs: kontrola
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zápis do logu nasazení
+        env:
+          VERSION: ${{ needs.kontrola.outputs.version }}
+          ENVIRONMENT: ${{ needs.kontrola.outputs.environment }}
+          REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
+          REQUESTED_AT: ${{ github.event.client_payload.requested_at }}
+          APPROVED_BY: ${{ github.event.client_payload.approved_by }}
+          REQUEST_ID: ${{ github.event.client_payload.request_id }}
+          FLOW: ${{ github.event.client_payload.flow || 'github-rucne' }}
+        run: |
+          DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p deployments
+          if [ ! -f deployments/log.csv ]; then
+            echo "deployed_at,requested_at,version,environment,requested_by,approved_by,flow,request_id,run_id" > deployments/log.csv
+          fi
+          clean() { printf '%s' "$1" | tr -d ',\n\r'; }
+          echo "$DEPLOYED_AT,$(clean "$REQUESTED_AT"),$VERSION,$ENVIRONMENT,$(clean "$REQUESTED_BY"),$(clean "$APPROVED_BY"),$(clean "$FLOW"),$(clean "$REQUEST_ID"),$GITHUB_RUN_ID" >> deployments/log.csv
+          cat > site/deploy-info.json <<EOF
+          {
+            "version": "$VERSION",
+            "environment": "$ENVIRONMENT",
+            "deployed_at": "$DEPLOYED_AT",
+            "requested_at": "$(clean "$REQUESTED_AT")",
+            "requested_by": "$(clean "$REQUESTED_BY")",
+            "approved_by": "$(clean "$APPROVED_BY")",
+            "flow": "$(clean "$FLOW")",
+            "run_id": "$GITHUB_RUN_ID"
+          }
+          EOF
+          cp deployments/log.csv site/log.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deployments/log.csv
+          git commit -m "Nasazení $VERSION do prostředí $ENVIRONMENT"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: pages
+        uses: actions/deploy-pages@v4
