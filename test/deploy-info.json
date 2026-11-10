@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "environment": "test",
+  "deployed_at": "2026-11-10T16:49:22Z",
+  "requested_at": "2026-11-10T16:48:45.997347Z",
+  "requested_by": "janhreb@office365.zcu.cz",
+  "approved_by": "",
+  "flow": "flow1-rucni",
+  "run_id": "42858376983"
+}
