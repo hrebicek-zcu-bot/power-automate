@@ -1,4 +1,12 @@
-# Nasazení aplikace na GitHub Pages na žádost z Power Automate.
+# Nasazení simulátoru vytápění na GitHub Pages na žádost z Power Automate.
+#
+# Nasazovaná aplikace: https://github.com/HrebicekHonza/smart-home
+# Verze X.Y.Z odpovídá tagu vX.Y.Z v tomto repozitáři. Workflow vezme kód
+# z tagu, sestaví veřejnou edici simulátoru a publikuje ji do složky
+# prostředí:
+#   https://hrebicek-zcu-bot.github.io/power-automate/test/simulator/
+#   https://hrebicek-zcu-bot.github.io/power-automate/produkce/simulator/
+# Kořen webu je přehled nasazení (složka site/).
 #
 # Spouští se:
 #   - repository_dispatch s typem "deploy" (akce GitHub konektoru
@@ -7,11 +15,11 @@
 #
 # Očekávaný client_payload z Power Automate:
 #   {
-#     "version": "1.2.0",            povinné, tvar X.Y.Z (volitelně s „v“)
+#     "version": "1.0.0",            povinné, tvar X.Y.Z (volitelně s „v“), tag musí existovat
 #     "environment": "test",         povinné, "test" nebo "produkce"
 #     "requested_by": "jmeno@...",   kdo žádal
 #     "requested_at": "2026-11-08T14:05:00Z",  kdy vznikla žádost (ISO 8601)
-#     "approved_by": "jmeno@...",    kdo schválil (jen flow se schválením)
+#     "approved_by": "jmeno@...",    kdo schválil – povinné pro produkci
 #     "request_id": "abc123",        id běhu flow, pro dohledání
 #     "flow": "flow1-rucni"          který flow žádost poslal
 #   }
@@ -23,9 +31,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Verze (X.Y.Z)
+        description: Verze (X.Y.Z, musí existovat tag vX.Y.Z)
         required: true
-        default: 0.1.0
+        default: 1.0.0
       environment:
         description: Prostředí
         required: true
@@ -41,6 +49,9 @@ concurrency:
   group: nasazeni
   cancel-in-progress: false
 
+env:
+  APP_REPO: HrebicekHonza/smart-home
+
 jobs:
   kontrola:
     runs-on: ubuntu-latest
@@ -53,6 +64,8 @@ jobs:
         env:
           VERSION: ${{ github.event.client_payload.version || inputs.version }}
           ENVIRONMENT: ${{ github.event.client_payload.environment || inputs.environment }}
+          APPROVED_BY: ${{ github.event.client_payload.approved_by }}
+          EVENT: ${{ github.event_name }}
         run: |
           VERSION="${VERSION#v}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -63,22 +76,58 @@ jobs:
             echo "::error::Neplatné prostředí '$ENVIRONMENT' – povoleno je 'test' nebo 'produkce'."
             exit 1
           fi
+          if [[ "$EVENT" == "repository_dispatch" && "$ENVIRONMENT" == "produkce" && -z "$APPROVED_BY" ]]; then
+            echo "::error::Nasazení do produkce vyžaduje schválení (approved_by)."
+            exit 1
+          fi
+          if ! git ls-remote --exit-code --tags "https://github.com/$APP_REPO.git" "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::Verze $VERSION neexistuje – v $APP_REPO chybí tag v$VERSION."
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
 
   nasazeni:
     needs: kontrola
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
-      url: ${{ steps.pages.outputs.page_url }}
+      url: ${{ steps.pages.outputs.page_url }}${{ needs.kontrola.outputs.environment }}/simulator/
+    env:
+      VERSION: ${{ needs.kontrola.outputs.version }}
+      ENVIRONMENT: ${{ needs.kontrola.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Zápis do logu nasazení
+      - name: Stažení aplikace ve verzi
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.APP_REPO }}
+          ref: v${{ needs.kontrola.outputs.version }}
+          path: app
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: app/.nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Sestavení simulátoru
+        working-directory: app
         env:
-          VERSION: ${{ needs.kontrola.outputs.version }}
-          ENVIRONMENT: ${{ needs.kontrola.outputs.environment }}
+          VITE_EDITION: simulator
+          BASE_PATH: /${{ github.event.repository.name }}/${{ needs.kontrola.outputs.environment }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Složení webu (obě prostředí + přehled)
+        env:
           REQUESTED_BY: ${{ github.event.client_payload.requested_by || github.actor }}
           REQUESTED_AT: ${{ github.event.client_payload.requested_at }}
           APPROVED_BY: ${{ github.event.client_payload.approved_by }}
@@ -86,13 +135,18 @@ jobs:
           FLOW: ${{ github.event.client_payload.flow || 'github-rucne' }}
         run: |
           DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          mkdir -p deployments
-          if [ ! -f deployments/log.csv ]; then
-            echo "deployed_at,requested_at,version,environment,requested_by,approved_by,flow,request_id,run_id" > deployments/log.csv
+          clean() { printf '%s' "$1" | tr -d ',\n\r"\\'; }
+
+          # Dříve nasazená prostředí leží ve větvi "nasazeno".
+          mkdir -p pub
+          if git ls-remote --exit-code --heads origin nasazeno > /dev/null; then
+            git fetch --depth 1 origin nasazeno
+            git archive FETCH_HEAD | tar -x -C pub
           fi
-          clean() { printf '%s' "$1" | tr -d ',\n\r'; }
-          echo "$DEPLOYED_AT,$(clean "$REQUESTED_AT"),$VERSION,$ENVIRONMENT,$(clean "$REQUESTED_BY"),$(clean "$APPROVED_BY"),$(clean "$FLOW"),$(clean "$REQUEST_ID"),$GITHUB_RUN_ID" >> deployments/log.csv
-          cat > site/deploy-info.json <<EOF
+
+          rm -rf "pub/$ENVIRONMENT"
+          cp -r app/apps/web/build "pub/$ENVIRONMENT"
+          cat > "pub/$ENVIRONMENT/deploy-info.json" <<EOF
           {
             "version": "$VERSION",
             "environment": "$ENVIRONMENT",
@@ -104,16 +158,36 @@ jobs:
             "run_id": "$GITHUB_RUN_ID"
           }
           EOF
-          cp deployments/log.csv site/log.csv
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p deployments
+          if [ ! -f deployments/log.csv ]; then
+            echo "deployed_at,requested_at,version,environment,requested_by,approved_by,flow,request_id,run_id" > deployments/log.csv
+          fi
+          echo "$DEPLOYED_AT,$(clean "$REQUESTED_AT"),$VERSION,$ENVIRONMENT,$(clean "$REQUESTED_BY"),$(clean "$APPROVED_BY"),$(clean "$FLOW"),$(clean "$REQUEST_ID"),$GITHUB_RUN_ID" >> deployments/log.csv
+
+          cp site/* pub/
+          cp deployments/log.csv pub/log.csv
+          touch pub/.nojekyll
+
+      - name: Uložení stavu (log + větev nasazeno)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add deployments/log.csv
           git commit -m "Nasazení $VERSION do prostředí $ENVIRONMENT"
           git push
 
+          cd pub
+          git init -q -b nasazeno
+          git add -A
+          git commit -qm "Stav po nasazení $VERSION do prostředí $ENVIRONMENT"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" nasazeno
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: pub
       - id: pages
         uses: actions/deploy-pages@v4

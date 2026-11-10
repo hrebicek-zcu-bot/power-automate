@@ -14,6 +14,7 @@
   .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; margin-top: 24px; }
   .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--accent); color: #fff; }
   .badge.test { background: #b07a12; }
+  .open { float: right; color: var(--accent); font-weight: 600; text-decoration: none; }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 14px 0 0; }
   dt { color: var(--muted); }
   dd { margin: 0; font-weight: 600; }
@@ -26,18 +27,33 @@
 <body>
 <main>
   <h1>Simulátor vytápění</h1>
-  <p class="muted">Aplikace se připravuje v rámci předmětu KKY/AKS. Tato stránka zatím ukazuje, která verze je nasazená a jak nasazení proběhlo.</p>
+  <p class="muted">Přehled nasazení simulátoru řízení vytápění (KKY/AKS). Nasazení spouští flow v Power Automate přes GitHub Actions (KPV/OPP).</p>
 
-  <section class="card">
-    <span id="env" class="badge">–</span>
+  <section class="card" id="test">
+    <span class="badge test">Testovací prostředí</span>
+    <a class="open" href="test/simulator/">Otevřít simulátor →</a>
     <dl>
-      <dt>Verze</dt><dd id="version">–</dd>
-      <dt>Nasazeno</dt><dd id="deployed">–</dd>
-      <dt>Žádost podána</dt><dd id="requested">–</dd>
-      <dt>Doba od žádosti po nasazení</dt><dd id="lead">–</dd>
-      <dt>Žadatel</dt><dd id="by">–</dd>
-      <dt>Schválil</dt><dd id="approved">–</dd>
-      <dt>Spuštěno z</dt><dd id="flow">–</dd>
+      <dt>Verze</dt><dd data-k="version">–</dd>
+      <dt>Nasazeno</dt><dd data-k="deployed">–</dd>
+      <dt>Žádost podána</dt><dd data-k="requested">–</dd>
+      <dt>Doba od žádosti po nasazení</dt><dd data-k="lead">–</dd>
+      <dt>Žadatel</dt><dd data-k="by">–</dd>
+      <dt>Schválil</dt><dd data-k="approved">–</dd>
+      <dt>Spuštěno z</dt><dd data-k="flow">–</dd>
+    </dl>
+  </section>
+
+  <section class="card" id="produkce">
+    <span class="badge">Produkce</span>
+    <a class="open" href="produkce/simulator/">Otevřít simulátor →</a>
+    <dl>
+      <dt>Verze</dt><dd data-k="version">–</dd>
+      <dt>Nasazeno</dt><dd data-k="deployed">–</dd>
+      <dt>Žádost podána</dt><dd data-k="requested">–</dd>
+      <dt>Doba od žádosti po nasazení</dt><dd data-k="lead">–</dd>
+      <dt>Žadatel</dt><dd data-k="by">–</dd>
+      <dt>Schválil</dt><dd data-k="approved">–</dd>
+      <dt>Spuštěno z</dt><dd data-k="flow">–</dd>
     </dl>
   </section>
 
@@ -58,19 +74,15 @@
     var m = Math.floor(s / 60), r = Math.round(s % 60);
     return m ? m + ' min ' + r + ' s' : r + ' s';
   }
-  fetch('deploy-info.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (i) {
-    if (!i) return;
-    var env = document.getElementById('env');
-    env.textContent = i.environment === 'test' ? 'Testovací prostředí' : 'Produkce';
-    env.className = 'badge' + (i.environment === 'test' ? ' test' : '');
-    document.getElementById('version').textContent = i.version;
-    document.getElementById('deployed').textContent = fmt(i.deployed_at);
-    document.getElementById('requested').textContent = fmt(i.requested_at);
-    document.getElementById('lead').textContent = lead(i.requested_at, i.deployed_at);
-    document.getElementById('by').textContent = i.requested_by || '–';
-    document.getElementById('approved').textContent = i.approved_by || '–';
-    document.getElementById('flow').textContent = i.flow || '–';
-  }).catch(function () {});
+  ['test', 'produkce'].forEach(function (e) {
+    fetch(e + '/deploy-info.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (i) {
+      var card = document.getElementById(e);
+      if (!i) { card.querySelector('.open').style.display = 'none'; card.querySelector('[data-k=version]').textContent = 'zatím nenasazeno'; return; }
+      var v = { version: i.version, deployed: fmt(i.deployed_at), requested: fmt(i.requested_at), lead: lead(i.requested_at, i.deployed_at),
+                by: i.requested_by || '–', approved: i.approved_by || '–', flow: i.flow || '–' };
+      Object.keys(v).forEach(function (k) { card.querySelector('[data-k=' + k + ']').textContent = v[k]; });
+    }).catch(function () {});
+  });
   fetch('log.csv', { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
     var rows = t.trim().split('\n').filter(Boolean);
     if (rows.length < 2) return;
