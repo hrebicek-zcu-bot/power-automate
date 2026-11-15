@@ -22,12 +22,21 @@
   table { border-collapse: collapse; width: 100%; font-size: 14px; }
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; }
+  .button { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+  .form-frame { display: block; width: 100%; height: 640px; margin-top: 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 </style>
 </head>
 <body>
 <main>
   <h1>Simulátor vytápění</h1>
   <p class="muted">Přehled nasazení simulátoru řízení vytápění (KKY/AKS). Nasazení spouští flow v Power Automate přes GitHub Actions (KPV/OPP).</p>
+
+  <section class="card" id="zadost">
+    <h2 style="margin:0 0 8px;font-size:20px">Žádost o nasazení</h2>
+    <p class="muted" style="margin:0 0 14px">Vyplněním formuláře se spustí Flow 2: kontrola verze, schválení a nasazení do zvoleného prostředí. Formulář vyžaduje přihlášení školním účtem ZČU. Pokud se níže nenačte, otevřete ho tlačítkem.</p>
+    <a class="button" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=aMfVm7iQT06EFhR3KdkcU58i-Ml64SpPsY9uzFct1bhURU4zS1VYV0FCVFY2WkM2SjVHM0VUR1lKRy4u" target="_blank" rel="noopener">Otevřít formulář v nové záložce →</a>
+    <iframe class="form-frame" title="Žádost o nasazení simulátoru" src="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=aMfVm7iQT06EFhR3KdkcU58i-Ml64SpPsY9uzFct1bhURU4zS1VYV0FCVFY2WkM2SjVHM0VUR1lKRy4u&amp;embed=true" loading="lazy" allowfullscreen></iframe>
+  </section>
 
   <section class="card" id="test">
     <span class="badge test">Testovací prostředí</span>
