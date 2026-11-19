@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "environment": "produkce",
+  "deployed_at": "2026-11-19T10:23:48Z",
+  "requested_at": "2026-11-19T10:22:32.2827263Z",
+  "requested_by": "janhreb@office365.zcu.cz",
+  "approved_by": "janhreb@office365.zcu.cz",
+  "flow": "flow2-schvaleni",
+  "run_id": "44505183685"
+}
